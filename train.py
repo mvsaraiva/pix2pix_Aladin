@@ -1,3 +1,5 @@
+from posix import EX_OSFILE
+from config import NUM_EPOCHS
 import torch
 from utils import save_checkpoint, load_checkpoint, save_some_examples
 import torch.nn as nn
@@ -12,10 +14,9 @@ from torchvision.utils import save_image
 
 torch.backends.cudnn.benchmark = True
 
-def train_fn(
-    disc, gen, loader, opt_disc, opt_gen, l1_loss, bce, g_scaler, d_scaler,
-):
-    loop = tqdm(loader, leave=True)
+def train_fn(disc, gen, loader, opt_disc, opt_gen, l1_loss, bce, g_scaler, d_scaler, disc_scheduler, gen_scheduler):
+   
+    loop = tqdm(loader, leave=False)
 
     for idx, (x, y) in enumerate(loop):
         x = x.to(config.DEVICE)
@@ -54,11 +55,34 @@ def train_fn(
             )
 
 
+def gen_init_weights(m):
+    '''Initialize the  '''
+    if (isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d)):
+        torch.nn.init.normal_(m.weight, mean=0.0, std=0.02)
+
+def disc_init_weights(m):
+    if isinstance(m, nn.Conv2d):
+        torch.nn.init.normal_(m.weight, mean=0.0, std=0.02)
+
 def main():
     disc = Discriminator(in_channels=3).to(config.DEVICE)
+    disc.apply(disc_init_weights)
     gen = Generator(in_channels=3, features=64).to(config.DEVICE)
+    gen.apply(gen_init_weights)
     opt_disc = optim.Adam(disc.parameters(), lr=config.LEARNING_RATE, betas=(0.5, 0.999),)
     opt_gen = optim.Adam(gen.parameters(), lr=config.LEARNING_RATE, betas=(0.5, 0.999))
+
+    
+    
+    def lambda_rule(epoch):
+        lr_l = 1.0 - max(0, epoch - config.NUM_EPOCHS//2) / (config.NUM_EPOCHS//2)
+        print(lr_l)
+ 
+        return lr_l
+
+    disc_scheduler = optim.lr_scheduler.LambdaLR(optimizer=opt_disc, lr_lambda=lambda_rule)    
+    gen_scheduler = optim.lr_scheduler.LambdaLR(optimizer=opt_gen, lr_lambda=lambda_rule)    
+
     BCE = nn.BCEWithLogitsLoss()
     L1_LOSS = nn.L1Loss()
 
@@ -82,9 +106,13 @@ def main():
     val_dataset = MapDataset(root_dir=config.VAL_DIR)
     val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
 
-    for epoch in range(config.NUM_EPOCHS):
+
+    for epoch in tqdm(range(config.NUM_EPOCHS), leave= True):
+        print(f"Epoch {epoch} of {NUM_EPOCHS}")
+        print('disc_learning_rate: {:.6f}'.format(opt_disc.param_groups[0]["lr"]))
+        print('gen_learning_rate: {:.6f}'.format(opt_gen.param_groups[0]["lr"]))
         train_fn(
-            disc, gen, train_loader, opt_disc, opt_gen, L1_LOSS, BCE, g_scaler, d_scaler,
+            disc, gen, train_loader, opt_disc, opt_gen, L1_LOSS, BCE, g_scaler, d_scaler, disc_scheduler, gen_scheduler,
         )
 
         if config.SAVE_MODEL and epoch % 5 == 0:
@@ -92,6 +120,14 @@ def main():
             save_checkpoint(disc, opt_disc, filename=config.CHECKPOINT_DISC)
 
         save_some_examples(gen, val_loader, epoch, folder="evaluation")
+
+        print(epoch, config.NUM_EPOCHS//2)
+
+        
+        gen_scheduler.step()
+        disc_scheduler.step()
+            
+
 
 
 if __name__ == "__main__":

@@ -1,5 +1,7 @@
 import torch 
 import torch.nn as nn
+from torchvision.utils import save_image
+
 
 class CNNBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride):
@@ -41,13 +43,18 @@ class Discriminator(nn.Module):
         x = self.initial(x)
         return self.model(x)
 
+def init_weights(m):
+    if isinstance(m, nn.Conv2d):
+        torch.nn.init.normal_(m.weight, mean=0.0, std=0.02)
+
 def test():
-    x  = torch.randn(1, 3, 256, 256)
-    y = torch.randn(1, 1,256, 256)
+    x = torch.randn(1, 3, 256, 256)
+    y = torch.randn(1, 3,256, 256)
     model = Discriminator()
+    model.apply(init_weights)
     preds = model(x,y)
     print(preds.shape)
+    save_image(preds, "d.png")
 
 if __name__ == '__main__':
     test()
-
